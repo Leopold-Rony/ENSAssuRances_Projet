@@ -1,0 +1,123 @@
+---
+title: "Data Cleaning et Jointure"
+output: html_document
+---
+
+# 1. Ingénierie des Données : État des lieux de la qualité
+
+Avant d'appliquer des stratégies d'imputation ou de suppression, nous devons quantifier les problèmes dans nos tables. Nous allons rechercher :
+1. **Les doublons** : des lignes répétées par erreur.
+2. **Les valeurs manquantes (NA)** : des informations non renseignées.
+3. **Les incohérences (Anomalies)** : comme les montants de sinistres négatifs repérés lors de l'exploration.
+
+```{r chargement-donnees, warning=FALSE, message=FALSE}
+library(dplyr)
+library(tidyr)
+
+# 1. Chargement des données issues de l'étape 1 
+contrats <- readRDS("contrats_exploration_ok.rds")
+sinistres <- readRDS("sinistres_explorations_ok.rds")
+```
+
+
+```{r chargement-donnees, warning=FALSE, message=FALSE}
+# 2. Vérification des doublons exacts
+print("--- NOMBRE DE DOUBLONS ---")
+cat("Contrats :", sum(duplicated(contrats)), "\n")
+cat("Sinistres :", sum(duplicated(sinistres)), "\n")
+```
+
+
+```{r chargement-donnees, warning=FALSE, message=FALSE}
+# 3. Vérification des valeurs manquantes (NA)
+print("--- COLONNES AVEC LE PLUS DE VALEURS MANQUANTES (CONTRATS) ---")
+na_contrats <- colSums(is.na(contrats))
+print(sort(na_contrats[na_contrats > 0], decreasing = TRUE)[1:5])
+
+print("--- COLONNES AVEC LE PLUS DE VALEURS MANQUANTES (SINISTRES) ---")
+na_sinistres <- colSums(is.na(sinistres))
+print(sort(na_sinistres[na_sinistres > 0], decreasing = TRUE)[1:5])
+```
+
+
+```{r chargement-donnees, warning=FALSE, message=FALSE}
+# 4. Vérification des anomalies : montants de sinistres négatifs
+print("--- SINISTRES AVEC MONTANTS NÉGATIFS ---")
+anomalies_negatives <- sinistres %>% 
+  filter(mt_eval < 0 | mt_regl < 0) %>% 
+  count()
+
+print(anomalies_negatives)
+```
+
+## 1.1 Interprétation des résultats et Stratégie de Nettoyage
+
+L'état des lieux de la qualité de nos données nous a fourni des indications précieuses sur la marche à suivre pour le nettoyage :
+
+1. **Gestion des Doublons :** Nous avons identifié **68 doublons exacts** dans la table des sinistres. Pour ne pas fausser nos calculs de fréquence de sinistralité, nous allons les supprimer. La table des contrats est propre (0 doublon).
+
+2. **Valeurs manquantes massives (Contrats) :** Les variables `id3_AssVHR`, `id3_Ass0km`, etc., comptent plus de 301 000 valeurs manquantes (soit près de 100% de la base). En assurance, c'est tout à fait normal : cela signifie simplement que la grande majorité des assurés n'ont pas eu de 2ème ou 3ème sinistre dans l'année ! 
+   *Stratégie :* Au lieu de les supprimer, nous allons les conserver car ce sont nos seules "clés" pour relier un sinistre à un contrat. Nous les "pivoterons" lors de la jointure.
+
+3. **Valeurs manquantes justifiées (Sinistres) :** La colonne `clo_sin` (Date de clôture) présente **39 099 valeurs manquantes**. Loin d'être une erreur, cela indique que plus de la moitié de nos sinistres sont encore en cours de gestion (non clôturés). 
+   *Stratégie :* Nous allons créer une nouvelle variable explicite `statut_sinistre` indiquant "Ouvert" (si NA) ou "Clôturé" (si une date est présente).
+
+4. **Anomalies de montants - Recours (Sinistres) :** Nous avons repéré **1 161 sinistres avec des montants négatifs**. Il s'agit de "recours" (des dossiers où l'assurance a récupéré de l'argent auprès d'un tiers responsable). 
+   *Stratégie :* Pour garder la réalité comptable tout en facilitant l'analyse, nous allons conserver ces montants tels quels, mais nous allons créer une variable indicatrice `est_recours` (Oui/Non).
+   
+
+
+## 1.2 Exécution du Nettoyage et Jointure des tables
+
+Conformément à notre stratégie, nous utilisons les packages `dplyr` et `tidyr` pour transformer nos données. 
+L'étape la plus cruciale est la préparation de la clé de jointure : la fonction `pivot_longer()` nous permet de transformer les 9 colonnes d'identifiants de sinistres (`id1_AssBase`, etc.) en une seule colonne exploitable (`idx_sin`). 
+Nous réalisons ensuite une double jointure (`inner_join` puis `left_join`) pour construire notre base d'analyse finale unique.
+
+```{r data-cleaning-et-jointure, warning=FALSE, message=FALSE}
+#1.nettoyage de la table CONTRATS
+
+contrats_clean_final <- contrats %>% 
+  distinct()
+
+#2.nettoyage de la table SINISTRES
+sinistres_clean_final <- sinistres %>% 
+  distinct() %>% 
+  mutate( 
+    statut_sinistre = if_else(is.na(clo_sin),"Ouvert","Clôturé"),
+    est_recours = if_else(mt_eval < 0 | mt_regl < 0,"Oui","Non") )
+```
+
+
+```{r data-cleaning-et-jointure, warning=FALSE, message=FALSE}
+# 3. CRÉATION DE LA CLÉ DE JOINTURE (Le Pivot)
+lien_contrat_sinistre <- contrats_clean_final %>%
+  select(idxCt, idxYear, starts_with("id1_"), starts_with("id2_"), starts_with("id3_")) %>%
+  pivot_longer(
+    cols = c(starts_with("id1_"), starts_with("id2_"), starts_with("id3_")), 
+    names_to = "type_garantie_id",
+    values_to = "idx_sin"
+  ) %>%
+  filter(!is.na(idx_sin)) 
+```
+
+
+```{r data-cleaning-et-jointure, warning=FALSE, message=FALSE}
+# 4. LA JOINTURE (Fusion des données)
+base_complete <- sinistres_clean_final %>%
+  # On relie chaque sinistre à son contrat via l'identifiant du sinistre
+  inner_join(lien_contrat_sinistre, by = "idx_sin") %>%
+  # On rapatrie toutes les infos du véhicule et du conducteur
+  left_join(contrats_clean_final, by = c("idxCt", "idxYear"))
+
+# 5. VÉRIFICATION DES DIMENSIONS
+print("--- DIMENSIONS DE LA BASE COMPLÈTE ---")
+cat("Nombre de lignes :", nrow(base_complete), "\n")
+cat("Nombre de colonnes :", ncol(base_complete), "\n")
+```
+```{r sauvegarde-finale}
+# Sauvegarde de la base fusionnée et nettoyée pour les visualisations
+saveRDS(base_complete, "base_complete_clean.rds")
+print("Base complète sauvegardée avec succès !")
+```
+
+

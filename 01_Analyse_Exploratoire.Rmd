@@ -1,0 +1,189 @@
+---
+title: "Analyse Exploratoire"
+output: html_document
+
+# 1. Analyse Exploratoire des Données (EDA)
+
+## Étape 1 : Les types de données
+L'objectif ici est d'importer nos données (Contrats et Sinistres) et d'identifier nos variables :
+- **Données quantitatives** : des nombres (ex: âge, coût, nombre de sinistres).
+- **Données qualitatives** : des catégories ou du texte (ex: type de véhicule, genre, immatriculation).
+---
+
+```{r chargement-donnees, warning=FALSE, message=FALSE}
+#chargement des bibliothèques indispensables
+library(dplyr)
+library(readxl)
+```
+
+```{r chargement-donnees, warning=FALSE, message=FALSE}
+#1.importation des données 
+contrats <- read_excel("Contrat.xlsx",guess_max = Inf)
+sinistres <- read_excel("Sinistre.xlsx",guess_max = Inf)                
+```
+
+
+```{r chargement-donnees, warning=FALSE, message=FALSE}
+print("----STRUCTURE DE LA TABLE CONTRAT")
+glimpse(contrats)
+
+print("----STRUCTURE DE LA TABLE SINISTRE")
+glimpse(sinistres)
+
+```
+
+## Étape 1.b : Nettoyage et conversion des types de données
+
+L'aperçu des données a révélé que de nombreuses variables quantitatives (âges, montants) et nos dates ont été importées sous forme de texte (`<chr>`). 
+
+Dans le cadre de l'ingénierie des données , nous allons utiliser la fonction `mutate()` du package `dplyr` pour :
+1. Convertir les variables numériques avec `as.numeric()`.
+2. Convertir les dates avec `as.Date()`.
+
+Cette étape est cruciale pour pouvoir ensuite effectuer nos calculs statistiques (moyennes, médianes, etc.) sans générer d'erreurs.
+
+```{r nettoyage-types, warning=FALSE, message=FALSE}
+#je vais charger lubridate qui facilitera la gestion des dates
+library(lubridate)
+
+#1. Correction de la table CONTRATS
+contrats_clean <- contrats %>% 
+  mutate(
+    #conversations en données quantitatives
+    sitExpo = as.numeric(sitExpo),
+    drv1Age = as.numeric(drv1Age),
+    drv1DriveLicenceAge = as.numeric(drv1DriveLicenceAge),
+    vhAge = as.numeric(vhAge),
+    vhValue = as.numeric(vhValue),
+    COT_AssBase = as.numeric(COT_AssBase),
+    COT_Ass0km = as.numeric(COT_Ass0km),
+    COT_AssVHR = as.numeric(COT_AssVHR),
+    
+    #Conversion en date
+    
+    sitStartDate = as.Date(sitStartDate),
+    sitEndDate = as.Date(sitEndDate)
+  )
+
+```
+
+```{r nettoyage-types, warning=FALSE,message=FALSE}
+#2. Correction de la table Sinistre 
+
+sinistres_clean <- sinistres %>%
+  mutate(
+    #conversion numerique 
+    mt_eval = as.numeric(mt_eval),
+    mt_regl = as.numeric(mt_regl),
+    
+    #conversion en date
+    surv_sin = as.Date(surv_sin),
+    decl_sin = as.Date(decl_sin),
+    clo_sin = as.Date(clo_sin),
+    gest_sin = as.Date(gest_sin)
+  )
+
+```
+
+
+
+```{r nettoyage-types, warning=FALSE,message=FALSE}
+#3. verifications des changements 
+print("---- VERIFICATION CONTRATS -----")
+glimpse(contrats_clean)
+
+print("---- VERIFICATION SINISTRES -----")
+glimpse(sinistres_clean)
+
+
+```
+
+## Étape 2 : Valeurs extrêmes et Étendue (Dispersion)
+
+Conformément aux bonnes pratiques de l'analyse exploratoire, nous allons inspecter les valeurs numériques clés de nos tables pour en extraire :
+- Le Minimum et le Maximum (limites de la série).
+- L'étendue (la différence entre le Max et le Min) pour mesurer la dispersion.
+- La moyenne et la médiane .
+
+Pour cela, nous utiliserons la fonction native `summary()` de R qui est parfaite pour obtenir ces informations d'un seul coup d'œil, ainsi que les verbes de `dplyr` pour un calcul précis de l'étendue.
+
+
+```{r valeurs-extremes, warning=FALSE,message=FALSE}
+#1. Résumé statistique des variables quantitatives clés des CONTRATS
+
+print("-----STATISTIQUES DES CONTRATS-----")
+contrats_clean %>% select(drv1Age,vhAge,vhValue,COT_AssBase) %>% summary()
+
+#1. Résumé statistique des montants desSINISTRES
+
+print("-----STATISTIQUES DES SINISTRES-----")
+sinistres_clean %>% select(mt_eval,mt_regl) %>%
+  summary()
+
+
+#3. Calcul spécifique de l'étendue 
+print("----ETENDUE DE L'ÄGE DU CONDUCTEUR ----")
+
+etendue_age <- contrats_clean %>% 
+  summarise(
+    age_minimum = min(drv1Age,na.rm = TRUE),
+    age_maximum = max(drv1Age, na.rm = TRUE),
+    Etendue_Age = age_maximum - age_minimum
+  )
+print(etendue_age)
+
+```
+
+## Étape 3 : La valeur la plus représentée (Le Mode)
+
+R ne possède pas de fonction mathématique native simple pour le mode. Nous allons donc utiliser les verbes `count()` et `arrange()` du package `dplyr` (comme vu en ingénierie des données) pour compter les occurrences de nos variables qualitatives et les trier par ordre décroissant.
+
+```{r calcul-du-mode, warning=FALSE,message=FALSE}
+#1. Mode pour le type de véhicule
+print("---VEHICULE LE PLUS REPRESENTE---")
+mode_segement <- contrats_clean %>%
+  count(vhSegment) %>% arrange(desc(n))
+
+print(head(mode_segement,5))
+
+#2. Mode pour l'énergie du véhicule
+print("---CARBURANT LE PLUS REPRESENTE---")
+mode_energie <- contrats_clean %>%
+  count(vhEnergy) %>% arrange(desc(n))
+
+print(head(mode_energie,5))
+
+
+#3. Mode pour la garantie sinistrée
+print("---GARANTIE LA PLUS SINISTREE---")
+mode_garantie <- sinistres_clean %>%
+  count(gar_sin) %>% arrange(desc(n))
+
+print(mode_garantie)
+
+```
+
+## Conclusion de l'Analyse Exploratoire
+
+Grâce à cette première exploration, nous avons pu valider la cohérence globale de notre portefeuille et identifier son profil type :
+* **Profil des assurés et véhicules :** L'âge des conducteurs est cohérent (de 18,5 ans à 79 ans). Le véhicule le plus représenté est une citadine à motorisation essence.
+* **Sinistralité :** La garantie générant le plus grand nombre de dossiers est l'Assistance de Base (`AssBase`), ce qui est attendu en assurance automobile.
+* **Points de vigilance pour le nettoyage :** L'analyse des valeurs extrêmes a révélé la présence de montants de sinistres négatifs (minimum à -370 €). Ces anomalies devront être traitées lors de la phase de Data Cleaning, tout comme les potentielles valeurs manquantes et les doublons.
+
+
+```{r sauvegarde-donnees, message=FALSE}
+saveRDS(contrats_clean,"contrats_exploration_ok.rds")
+saveRDS(sinistres_clean,"sinistres_explorations_ok.rds")
+
+```
+
+
+
+
+
+
+
+
+
+
+
