@@ -1,0 +1,159 @@
+---
+title: "Analyse des Correspondances Multiples (ACM)"
+subtitle: "Volet 5 - Apprentissage Non Supervisé (Variables Qualitatives)"
+author: "Projet ENSAssuRances"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: paper
+    highlight: tango
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+    number_sections: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = "center")
+```
+
+#1. Introduction à l'ACM
+L'Analyse des Correspondances Multiples (ACM) est la méthode reine pour analyser des données d'assurance. Contrairement à l'ACP qui traite des chiffres, l'ACM analyse les associations entre des variables catégorielles (qualitatives).
+
+L'objectif est de répondre à une question clé de la tarification : Certains profils qualitatifs (ex: Homme + SUV + Utilisation Pro) sont-ils visuellement associés au fait d'avoir eu un accident ?
+
+##1.1. Préparation des données qualitatives
+Nous allons sélectionner nos variables catégorielles (Sexe, Segment, Énergie, Usage, Option Kilométrage) et créer une variable cible Statut_Sinistre pour savoir si le client a eu un accident au cours de l'année.
+
+
+```{r}
+# Chargement des librairies
+library(dplyr)
+library(FactoMineR)
+library(factoextra)
+
+# 1. Chargement des bases
+contrats_globaux <- readRDS("contrats_exploration_ok.rds")
+base_complete <- readRDS("base_complete_clean.rds") # La base avec les sinistres
+
+# 2. Identification des contrats ayant eu au moins un sinistre
+# On extrait la liste unique des numéros de contrats présents dans la base sinistre
+liste_sinistres <- unique(base_complete$idxCt)
+
+# 3. Construction de la base pour l'ACM
+data_acm <- contrats_globaux %>%
+  # Création de la variable cible (Oui/Non)
+  mutate(Statut_Sinistre = if_else(idxCt %in% liste_sinistres, "Sinistré", "Non Sinistré")) %>%
+  # Sélection des variables purement qualitatives
+  select(
+    drv1Sex,          # Sexe du conducteur
+    vhSegment,        # Citadine, SUV, etc.
+    vhEnergy,         # Essence, Diesel, etc.
+    ctUsage,          # Privé, Pro...
+    ctKM,             # Option petit rouleur (O/N)
+    Statut_Sinistre   # Notre variable cible !
+  ) %>%
+  # L'ACM de FactoMineR exige que toutes les variables soient au format "Facteur"
+  mutate(across(everything(), as.factor)) %>%
+  tidyr::drop_na()
+
+# Vérification
+print("--- DIMENSIONS AVANT L'ACM ---")
+cat("Nombre d'individus (lignes) :", nrow(data_acm), "\n")
+cat("Nombre de variables (colonnes) :", ncol(data_acm), "\n")
+```
+## 1.2. Exécution de l'algorithme ACM
+
+Pour construire notre espace de profils, nous utilisons les 5 variables descriptives de l'assuré et de son véhicule. 
+La variable `Statut_Sinistre` (située en 6ème position dans notre table) est déclarée comme **variable qualitative supplémentaire** (`quali.sup = 6`). Elle ne participe pas à la construction des axes, mais sera projetée a posteriori pour identifier les profils les plus proches du risque.
+
+```{r execution-acm}
+# Exécution de l'ACM (graph = FALSE pour ne pas planter la machine)
+res_acm <- MCA(data_acm, quali.sup = 6, ncp = 5, graph = FALSE)
+
+# Éboulis des valeurs propres
+fviz_eig(res_acm, addlabels = TRUE, ylim = c(0, 25),
+         main = "Variance expliquée par dimension (ACM)",
+         barfill = "#8e44ad", barcolor = "#2c3e50")
+```
+
+##1.3. La Carte des Modalités (Profils de Risque)
+Le graphique des modalités est l'outil central de l'ACM. Il projette les différentes catégories sur le plan factoriel.
+Règle d'interprétation : * Deux modalités proches signifient qu'elles sont fréquemment associées chez les mêmes assurés.
+
+Les modalités proches de l'origine (le centre 0,0) représentent le profil moyen du portefeuille.
+
+Les modalités très éloignées du centre caractérisent des profils atypiques ou très spécifiques.
+
+```{r}
+# Affichage des modalités sur les axes 1 et 2
+graph_mod <- fviz_mca_var(res_acm, 
+             repel = TRUE,                  # Évite la superposition des textes
+             col.var = "#2c3e50",           # Variables actives en gris/bleu foncé
+             col.quali.sup = "#e74c3c",     # Variable cible (Sinistre) en ROUGE vif
+             shape.var = 16,                # Forme des points
+             title = "Carte des profils qualitatifs et localisation du Risque") +
+  theme_minimal() +
+  # On ajoute des lignes de repère pour le point (0,0)
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50")
+
+print(graph_mod)
+
+
+```
+
+```{r}
+print("--- COORDONNÉES DES VARIABLES ACTIVES ---")
+print(round(res_acm$var$coord[, 1:2], 2))
+
+print("--- COORDONNÉES DE LA VARIABLE CIBLE (SINISTRES) ---")
+print(round(res_acm$quali.sup$coord[, 1:2], 2))
+```
+
+## 1.4. Répartition des Individus (Carte de Densité)
+
+Exactement comme pour l'ACP, nous projetons nos 301 437 assurés sur ce nouveau plan factoriel. La carte de densité nous permet de voir quels sont les "profils types" les plus fréquents dans le portefeuille (les zones les plus foncées).
+
+```{r graph-individus-acm, fig.width=8, fig.height=6}
+library(ggplot2)
+
+# 1. Extraction des coordonnées des individus dans l'ACM
+coord_ind_acm <- as.data.frame(res_acm$ind$coord)
+
+# Sécurisation des noms de colonnes (R remplace parfois les espaces par des points)
+colnames(coord_ind_acm)[1:2] <- c("Dim1", "Dim2")
+
+# 2. Création de la carte de densité (Heatmap 2D)
+graph_ind_acm <- ggplot(coord_ind_acm, aes(x = Dim1, y = Dim2)) +
+  # stat_density_2d trace les "courbes de niveau" de la concentration des clients
+  stat_density_2d(aes(fill = ..level..), geom = "polygon", color = "white", linewidth = 0.1) +
+  # On utilise un beau dégradé violet pour différencier de l'ACP (qui était bleue)
+  scale_fill_gradient(low = "#f4f6f7", high = "#8e44ad", name = "Densité\nd'assurés") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  labs(
+    title = "Concentration des profils qualitatifs (Nuage des individus)",
+    subtitle = "Lecture : Les zones foncées représentent les profils les plus courants",
+    x = "Axe 1 : Usage (Pro à gauche vs Privé/Essence à droite)",
+    y = "Axe 2 : Type de véhicule (Familiale/Hybride en bas vs SUV en haut)"
+  ) +
+  theme_minimal()
+
+print(graph_ind_acm)
+```
+
+
+
+## 1.4. Interprétation des Profils et du Risque
+
+L'analyse des coordonnées mathématiques de l'ACM nous révèle des informations capitales sur la structure de notre portefeuille et la répartition du risque :
+
+* **Axe 1 (L'Usage et le Kilométrage) :** Cet axe horizontal sépare très nettement les "Petits Rouleurs" (option ctKM = O, coordonnée +2.02) roulant à l'Essence, des conducteurs à usage "Professionnel" (-1.17) utilisant des motorisations Diesel ou Hybrides. 
+* **Axe 2 (Le Type de Parc) :** Cet axe vertical oppose un parc de "SUV" (0.84) majoritairement conduit par des femmes (0.58), à un parc de véhicules "Familiaux" (-0.65) et "Électriques/Hybrides" (-1.33) davantage conduit par des hommes.
+* **Le diagnostic du Risque (Variable cible) :** C'est le résultat le plus instructif de cette analyse. Les points "Sinistré" (-0.01, -0.02) et "Non Sinistré" (0.01, 0.01) se situent **exactement au centre de gravité du graphique (0,0)**. 
+
+**Conclusion:** Le fait de déclarer un sinistre n'est pas corrélé de manière évidente avec un profil qualitatif isolé (ex: "Homme en SUV" ou "Femme en Citadine"). Le risque de sinistralité est dilué de manière homogène à travers toutes les catégories de véhicules et d'énergies. Cela confirme qu'une tarification basée uniquement sur le segment du véhicule ou l'énergie serait discriminatoire et techniquement infondée. 
+Le risque doit donc être modélisé de manière multi-factorielle, en combinant ces catégories avec les variables quantitatives étudiées précédemment (Âge, Permis, Historique).
