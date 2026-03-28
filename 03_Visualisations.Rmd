@@ -1,0 +1,443 @@
+---
+title: "Visualisations et Analyse des Risques"
+output: html_document
+---
+
+# 1. Analyse de la Sinistralité Temporelle
+
+Pour bien comprendre la dynamique de notre portefeuille, la première étape consiste à observer l'évolution du nombre de sinistres au fil des années. Nous utilisons `ggplot2` pour visualiser cette distribution.
+
+```{r garph-sinistre-anne, warning=FALSE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+
+#1. chargement de la base propre fusionnée
+
+base_complete <- readRDS("base_complete_clean.rds")
+```
+
+
+```{r warning=FALSE, message=FALSE}
+graph_annee <- base_complete %>%
+  # On extrait l'année de la date de survenance du sinistre
+  mutate(annee_sinistre = year(surv_sin)) %>%
+  # On filtre les éventuels NA sur la date
+  filter(!is.na(annee_sinistre)) %>%
+  # On compte le nombre de sinistres par année
+  count(annee_sinistre, name = "total_sinistres") %>%
+  
+  # 3. Création du graphique avec ggplot2
+  ggplot(aes(x = as.factor(annee_sinistre), y = total_sinistres)) +
+  geom_bar(stat = "identity", fill = "#2c3e50") + # Un joli bleu professionnel
+  geom_text(aes(label = total_sinistres), vjust = -0.5, color = "black", size = 3.5) + # Ajout des étiquettes de données
+  labs(
+    title = "Évolution du nombre de sinistres par année",
+    subtitle = "Base de données ENSAssuRances",
+    x = "Année de survenance",
+    y = "Total des sinistres"
+  ) +
+  theme_minimal()
+
+# Affichage du graphique
+print(graph_annee)
+```
+
+## Interprétation : Évolution de la sinistralité
+
+L'histogramme révèle des variations temporelles très marquées, parfaitement explicables par le contexte macro-économique :
+* **L'effet COVID-19 (2020) :** On observe une chute drastique du nombre de sinistres déclarés (7 908 cas). Cela s'explique logiquement par les confinements successifs et la réduction massive de la circulation automobile cette année-là.
+* **Une reprise post-pandémie :** Les années 2021 et 2022 retrouvent des niveaux de sinistralité standards (autour de 9 500 à 11 300 sinistres).
+* **Un pic exceptionnel en 2023 :** L'année 2023 affiche une explosion avec plus de 15 000 sinistres. Cette hausse soudaine nécessitera d'être croisée avec l'évolution de la taille de notre portefeuille de contrats pour vérifier si elle est due à une acquisition massive de nouveaux clients ou à une dégradation réelle du risque (ex: événements climatiques).
+
+```{r graph-contrats-annee, warning=FALSE, message=FALSE}
+#1.Chargement de la table des contrats globaux 
+contrats_globaux <- readRDS("contrats_exploration_ok.rds")
+```
+
+
+```{r warning=FALSE, message=FALSE}
+#2. Préparation des données 
+data_contrats_annee <- contrats_globaux %>% 
+  count(idxYear, name = "nombre_contrats")
+
+print("---NOMBRE DE CONTRAT PAR ANNEE---")
+print(data_contrats_annee)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+# 3. Création du graphique avec ggplot2
+graph_contrats <- ggplot(data_contrats_annee, aes(x = as.factor(idxYear), y = nombre_contrats)) +
+  geom_bar(stat = "identity", fill = "#27ae60") + # Un joli vert pour les contrats
+  geom_text(aes(label = nombre_contrats), vjust = -0.5, size = 3.5, color = "black") +
+  labs(
+    title = "Évolution de la taille du portefeuille",
+    subtitle = "Nombre de contrats par année d'exercice",
+    x = "Année d'exercice",
+    y = "Nombre de contrats"
+  ) +
+  theme_minimal()
+
+# Affichage du graphique
+print(graph_contrats)
+```
+
+## Interprétation : Évolution du portefeuille
+
+La mise en perspective de la taille du portefeuille avec le nombre de sinistres confirme nos hypothèses :
+* **Validation de l'effet COVID-19 :** En 2020, le portefeuille de l'assureur a continué de croître (56 610 contrats), ce qui prouve que la chute brutale des sinistres est bien liée à une baisse de la circulation (confinements) et non à une fuite des clients.
+* **Explication du pic de 2023 :** La forte hausse des sinistres en 2023 s'explique en grande partie par une croissance très importante du portefeuille, qui atteint près de 70 000 contrats. La volumétrie des risques assurés a donc mécaniquement fait augmenter le nombre de déclarations.
+
+```{r graph-repartition-vehicules, warning=FALSE,message=FALSE}
+#1. Préparation des données : type de véhicule
+data_segment <- contrats_globaux %>% 
+  count(vhSegment,name = "nombre_vehicules") %>%
+  arrange(desc(nombre_vehicules))
+
+print("---DONNEES : REPARTITION PAR TYPE DE VEHICULE---")
+print(data_segment)
+```
+
+
+```{r warning=FALSE,message=FALSE}
+# Graphique Segment
+graph_segment <- ggplot(data_segment, aes(x = reorder(vhSegment, -nombre_vehicules), y = nombre_vehicules)) +
+  geom_bar(stat = "identity", fill = "#3498db") + # Bleu clair
+  geom_text(aes(label = nombre_vehicules), vjust = -0.5, size = 3.5) +
+  labs(title = "Répartition des contrats par type de véhicule", x = "Segment du véhicule", y = "Nombre de contrats") +
+  theme_minimal()
+
+print(graph_segment)
+```
+
+
+```{r warning=FALSE,message=FALSE}
+#2.  Préparation de données : Alimentation
+data_energie <- contrats_globaux %>% 
+  count(vhEnergy, name = "nombre_vehicules") %>%
+  arrange(desc(nombre_vehicules))
+print("---DONNEE : REPARTITION PAR ENERGIE ---")
+print(data_energie)
+```
+
+
+```{r warning=FALSE,message=FALSE}
+# Graphique Énergie
+graph_energie <- ggplot(data_energie, aes(x = reorder(vhEnergy, -nombre_vehicules), y = nombre_vehicules)) +
+  geom_bar(stat = "identity", fill = "#e67e22") + # Orange
+  geom_text(aes(label = nombre_vehicules), vjust = -0.5, size = 3.5) +
+  labs(title = "Répartition des contrats selon l'alimentation", x = "Type d'énergie", y = "Nombre de contrats") +
+  theme_minimal()
+
+print(graph_energie)
+```
+
+
+
+## Interprétation : Profil du parc automobile
+
+L'analyse univariée des caractéristiques des véhicules met en évidence le positionnement de notre portefeuille :
+* **Un parc majoritairement urbain :** Les citadines représentent le segment le plus important (120 614 contrats), suivies des familiales (75 566). Les SUV, bien que populaires sur le marché, restent minoritaires chez ENSAssuRances (45 304).
+* **Une motorisation thermique dominante :** L'essence (135 559) et le diesel (120 352) équipent la très grande majorité des véhicules. Néanmoins, on note la présence d'une part significative de véhicules Électriques/Hybrides (plus de 45 000 contrats), témoignant du renouvellement progressif du parc vers des mobilités plus vertes.
+
+```{r graph-groupe-et-km, warning=FALSE, message=FALSE}
+#1. Préparation des données : roupe de véhicule (vhGroup)
+
+data_groupe <- contrats_globaux %>% 
+  count(vhGroup, name = "nombre_vehicules") %>%
+  arrange(desc(nombre_vehicules))
+
+print("--- DONNÉES : TOP 10 DES GROUPES DE VÉHICULES ---")
+print(head(data_groupe, 10))
+```
+
+
+```{r warning=FALSE, message=FALSE}
+# Graphique : Distribution des groupes (On ne prend que le Top 15 pour que ce soit lisible)
+graph_groupe <- data_groupe %>%
+  top_n(15, nombre_vehicules) %>%
+  ggplot(aes(x = reorder(as.factor(vhGroup), -nombre_vehicules), y = nombre_vehicules)) +
+  geom_bar(stat = "identity", fill = "#8e44ad") + # Un joli violet
+  labs(title = "Distribution des véhicules par Groupe (Top 15)", x = "Groupe du véhicule", y = "Nombre de contrats") +
+  theme_minimal()
+
+print(graph_groupe)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+#2. Préparation des données : Option Petit Rouleur
+
+data_km <-  contrats_globaux %>%
+  count(ctKM, name = "nombre_contrats") %>% arrange(desc(nombre_contrats))
+
+print("--- DONNÉES : OPTION PETIT ROULEUR ---")
+print(data_km)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+# Graphique : Option Petit Rouleur
+graph_km <- ggplot(data_km, aes(x = ctKM, y = nombre_contrats)) +
+  geom_bar(stat = "identity", fill = "#16a085", width = 0.5) + # Vert émeraude
+  geom_text(aes(label = nombre_contrats), vjust = -0.5, size = 4) +
+  labs(title = "Répartition de l'option Petit Rouleur", x = "Option Petit Rouleur", y = "Nombre de contrats") +
+  theme_minimal()
+
+print(graph_km)
+
+```
+
+
+## Interprétation : Caractéristiques techniques et contractuelles
+
+L'analyse des variables de tarification classiques révèle les points suivants :
+* **Une homogénéité des véhicules assurés :** La distribution des groupes de véhicules (`vhGroup`) montre une forte concentration sur les segments intermédiaires (groupes 11 à 18). ENSAssuRances assure donc majoritairement des véhicules grand public standards, avec très peu de véhicules aux extrêmes (très bas de gamme ou haut de gamme/sportifs).
+* **Une option kilométrique minoritaire :** L'option "Petit Rouleur" (`ctKM`) n'est souscrite que par environ 13,4 % des assurés (40 464 contrats contre 260 973 pour l'usage classique). Il sera intéressant d'analyser par la suite si cette population présente effectivement une fréquence de sinistralité plus faible, justifiant ainsi une tarification avantageuse.
+
+```{r graph-risque-conducteur, warning=FALSE, message=FALSE}
+#1. chargement de la base sinistre 
+base_complete <- readRDS ("base_complete_clean.rds")
+```
+
+
+```{r warning=FALSE, message=FALSE}
+#---ANALYSE PAR ÂGE---
+# Préparation des données : on arrondit l'âge pour pouvoir les regrouper
+data_age <- base_complete %>%
+  mutate(
+    age_arrondi = floor(drv1Age)
+  ) %>% count(age_arrondi,name = "nombre_sinistres")
+
+print("--- DONNÉES : SINISTRES PAR ÂGE (Aperçu) ---")
+print(head(data_age, 10))
+```
+
+
+```{r warning=FALSE, message=FALSE}
+# Graphique : Courbe des sinistres par âge
+graph_age <- ggplot(data_age, aes(x = age_arrondi, y = nombre_sinistres)) +
+  geom_line(color = "#c0392b", size = 1) + # Une belle ligne rouge
+  geom_point(color = "#c0392b") +
+  labs(title = "Nombre de sinistres en fonction de l'âge du conducteur", 
+       x = "Âge du conducteur (années)", 
+       y = "Nombre total de sinistres") +
+  theme_minimal()
+
+print(graph_age)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+#--- ANALYSE PAR SEXE
+# Préparation des données et calcul du pourcentage 
+data_sexe <- base_complete %>% 
+  count(drv1Sex,name ="nombre_sinistres") %>%
+  mutate(pourcentage = round((nombre_sinistres / sum(nombre_sinistres)) * 100,1))
+
+print("--- DONNÉES : SINISTRES PAR SEXE ---")
+print(data_sexe)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+# Graphique : Répartition des sinistres par sexe
+graph_sexe <- ggplot(data_sexe, aes(x = drv1Sex, y = nombre_sinistres, fill = drv1Sex)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  geom_text(aes(label = paste0(nombre_sinistres, " (", pourcentage, "%)")), vjust = -0.5, size = 4) +
+  scale_fill_manual(values = c("F" = "#e74c3c", "H" = "#3498db")) + # Couleurs distinctes
+  labs(title = "Nombre et pourcentage de sinistres selon le sexe", 
+       x = "Sexe du conducteur", 
+       y = "Nombre de sinistres") +
+  theme_minimal() +
+  theme(legend.position = "none") # On cache la légende inutile
+
+print(graph_sexe)
+```
+
+
+
+## Interprétation : Analyse du risque lié au conducteur
+
+L'étude des sinistres selon le profil des assurés met en évidence des marqueurs de risque classiques en assurance automobile :
+* **Le risque "Jeune Conducteur" :** L'analyse de la courbe par âge montre une augmentation très rapide du nombre d'accidents chez les jeunes (avec un franchissement de la barre des 1 000 sinistres dès 25 ans). Ce volume élevé confirme la nécessité d'une surprime pour les conducteurs novices.
+* **La répartition par Sexe :** Les hommes déclarent la majorité des sinistres (59,2 %, soit 34 693 dossiers) contre 40,8 % pour les femmes. Toutefois, d'un point de vue actuariel, ce chiffre brut devra être relativisé par la proportion d'hommes et de femmes dans le portefeuille global (l'exposition) avant de pouvoir en tirer une conclusion sur la sinistralité réelle (fréquence) par genre.
+
+```{r graph-antecedents-segment, warning=FALSE, message=FALSE}
+#1. Analyse par antécédents de sinistres 
+data_antecedents <- base_complete %>%
+  count(claimsAnt,name = "nombre_sinistres")
+
+print("--- DONNÉES : SINISTRES SELON LES ANTÉCÉDENTS ---")
+print(data_antecedents)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+# Graphique : Antécédents
+graph_antecedents <- ggplot(data_antecedents, aes(x = as.factor(claimsAnt), y = nombre_sinistres)) +
+  geom_bar(stat = "identity", fill = "#34495e") + # Gris foncé très pro
+  geom_text(aes(label = nombre_sinistres), vjust = -0.5, size = 4) +
+  labs(title = "Nombre de sinistres selon les antécédents",
+       x = "Nombre de sinistres antérieurs (claimsAnt)",
+       y = "Total des sinistres actuels") +
+  theme_minimal()
+
+print(graph_antecedents)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+#2. Analyse par segment commercial
+data_sin_segment <- base_complete %>% 
+  count(vhSegment, name="nombre_sinistres") %>%
+  arrange(desc(nombre_sinistres))
+
+print("--- DONNÉES : SINISTRES PAR SEGMENT ---")
+print(data_sin_segment)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+
+# Graphique : Segment commercial
+graph_sin_segment <- ggplot(data_sin_segment, aes(x = reorder(vhSegment, -nombre_sinistres), y = nombre_sinistres)) +
+  geom_bar(stat = "identity", fill = "#d35400") + # Orange sombre
+  geom_text(aes(label = nombre_sinistres), vjust = -0.5, size = 4) +
+  labs(title = "Nombre de sinistres par segment commercial",
+       x = "Segment du véhicule",
+       y = "Nombre de sinistres") +
+  theme_minimal()
+
+print(graph_sin_segment)
+```
+
+
+## Interprétation : Antécédents et Volume par Segment
+
+L'étude des volumes de sinistres nous apporte deux enseignements majeurs :
+* **Le poids des "bons profils" :** La majorité absolue des sinistres (40 969) est le fait d'assurés n'ayant aucun antécédent récent. Le volume de "récidivistes" reste toutefois un point d'attention pour la tarification.
+* **Le biais de volume sur les véhicules :** Les citadines enregistrent le plus grand nombre de sinistres bruts (23 645). Cependant, ce chiffre n'indique pas nécessairement une plus grande dangerosité : il est le reflet direct de l'omniprésence des citadines dans notre portefeuille (plus de 120 000 contrats). Pour évaluer le risque réel de chaque type de véhicule, il est impératif de passer d'une logique de volume à une logique de **fréquence** (ratio sinistres / contrats).
+
+
+```{r graph-frequence-risque, warning=FALSE, message=FALSE}
+#1. calcul du nombre total de contrats par Segment
+
+expo_segment <- contrats_globaux %>%
+  count(vhSegment, name = "total_contrats")
+
+#2.calcul du nomre de sinistres par Segment
+
+sin_segment <- base_complete %>%
+  count(vhSegment,name = "total_sinistres")
+
+# 3. Calcul de la FRÉQUENCE (Le vrai risque !)
+risque_segment <- expo_segment %>%
+  # On fusionne les deux tableaux
+  inner_join(sin_segment, by = "vhSegment") %>%
+  # On calcule la fréquence en pourcentage : (Sinistres / Contrats) * 100
+  mutate(frequence_pct = round((total_sinistres / total_contrats) * 100, 2)) %>%
+  arrange(desc(frequence_pct))
+
+print("--- DONNÉES : FRÉQUENCE DE SINISTRALITÉ PAR SEGMENT (LE VRAI RISQUE) ---")
+print(risque_segment)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+# 4. Graphique : Fréquence de sinistralité
+graph_risque <- ggplot(risque_segment, aes(x = reorder(vhSegment, -frequence_pct), y = frequence_pct)) +
+  geom_bar(stat = "identity", fill = "#c0392b") + # Rouge pour indiquer le risque
+  geom_text(aes(label = paste0(frequence_pct, " %")), vjust = -0.5, size = 4, fontface = "bold") +
+  labs(title = "Identification des véhicules à risque",
+       subtitle = "Fréquence de sinistralité par segment (Sinistres / Contrats)",
+       x = "Segment du véhicule",
+       y = "Fréquence de sinistralité (%)") +
+  theme_minimal()
+
+print(graph_risque)
+```
+
+## Interprétation : Fréquence et Véhicules à Risque
+
+Le passage d'une analyse en volume à une analyse en fréquence révèle une information capitale pour la tarification :
+* **L'illusion du volume :** Bien que les Citadines génèrent de loin le plus grand nombre de sinistres, leur fréquence de sinistralité (19,60 %) est quasiment identique à celle des autres segments (19,56 % pour les Compactes, 19,09 % pour les Familiales). 
+* **Conclusion sur le risque :** Dans le portefeuille d'ENSAssuRances, le segment commercial du véhicule n'est pas un facteur discriminant majeur de la sinistralité. Le risque est réparti de manière très homogène sur l'ensemble des catégories de véhicules. La tarification devra donc s'appuyer sur d'autres facteurs (comme l'âge ou les antécédents) plutôt que sur le seul type de carrosserie.
+
+```{r prep-cartographie, warning=FALSE, message=FALSE}
+library(stringr) # Pour manipuler les chaînes de caractères (le code INSEE)
+
+# 1. Extraction du département pour tous les contrats
+contrats_geo <- contrats_globaux %>%
+  # On prend les 2 premiers caractères du code INSEE pour avoir le département
+  mutate(departement = str_sub(ctINSEE, 1, 2)) %>%
+  # On filtre pour ne garder que la France métropolitaine (01 à 95)
+  filter(departement %in% sprintf("%02d", 1:95))
+
+# 2. Calcul de l'exposition (nombre de contrats par département)
+expo_dept <- contrats_geo %>%
+  count(departement, name = "total_contrats")
+
+# 3. Extraction du département pour les sinistres
+sinistres_geo <- base_complete %>%
+  mutate(departement = str_sub(ctINSEE, 1, 2)) %>%
+  filter(departement %in% sprintf("%02d", 1:95)) %>%
+  count(departement, name = "total_sinistres")
+
+# 4. Calcul de la Fréquence par Département
+risque_geo <- expo_dept %>%
+  inner_join(sinistres_geo, by = "departement") %>%
+  mutate(frequence_pct = round((total_sinistres / total_contrats) * 100, 2)) %>%
+  # On se concentre sur les départements où l'on a au moins 100 contrats pour que ce soit statistique
+  filter(total_contrats > 100) %>%
+  arrange(desc(frequence_pct))
+
+# Affichage du Top 10 des départements les plus risqués
+print("--- TOP 10 DES DÉPARTEMENTS LES PLUS RISQUÉS (FRÉQUENCE EN %) ---")
+print(head(risque_geo, 10))
+```
+
+## Interprétation : Analyse Spatiale et Tarification Géographique
+
+L'analyse de la fréquence de sinistralité par département (code INSEE) révèle des disparités territoriales majeures :
+* **Des zones de sur-risque :** Le département 45 (Loiret) affiche la fréquence la plus élevée du portefeuille (23,6 %), suivi de près par les départements 69 (Rhône) et 77 (Seine-et-Marne). Ces fréquences dépassent largement la moyenne globale du portefeuille (environ 19,3 %).
+* **Impact tarifaire :** La présence de départements très urbains ou traversés par des axes routiers majeurs dans ce Top 10 confirme que la zone de circulation est un facteur de risque déterminant. Cette cartographie statistique justifie la mise en place d'un zonier tarifaire (surprime pour les départements à forte fréquence) pour maintenir l'équilibre technique d'ENSAssuRances.
+
+```{r cartographie-risque, warning=FALSE, message=FALSE}
+library(sf)
+library(ggplot2)
+
+# 1. CHARGEMENT DU SHAPEFILE
+france_sf <- st_read("ARRONDISSEMENT.shp", quiet = TRUE) # On ajoute quiet = TRUE pour éviter le texte de log dans le rapport final
+
+# 2. JOINTURE : Fusionner la carte avec nos statistiques
+# On utilise la bonne colonne CODE_DEPT trouvée grâce à la fonction names()
+carte_data <- france_sf %>%
+  left_join(risque_geo, by = c("CODE_DEPT" = "departement"))
+
+# 3. CRÉATION DE LA CARTE THÉMATIQUE
+carte_finale <- ggplot(carte_data) +
+  # Tracé des polygones
+  geom_sf(aes(fill = frequence_pct), color = "black", linewidth = 0.1) +
+  # Dégradé de couleurs personnalisé
+  scale_fill_gradient(
+    low = "#f1c40f",      # Jaune pour un risque faible
+    high = "#c0392b",     # Rouge foncé pour un risque élevé
+    na.value = "#ecf0f1", # Gris clair pour les zones sans données (DOM-TOM, etc.)
+    name = "Fréquence (%)"
+  ) +
+  labs(
+    title = "Carte de la sinistralité en France",
+    subtitle = "Fréquence de sinistralité par département (Portefeuille ENSAssuRances)",
+    caption = "Données géographiques : IGN (GEOFLA)"
+  ) +
+  # Thème épuré pour une carte lisible
+  theme_void() +
+  theme(legend.position = "right")
+
+# Affichage de la carte
+print(carte_finale)
+```
+
+

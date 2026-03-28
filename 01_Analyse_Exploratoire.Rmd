@@ -16,14 +16,14 @@ library(dplyr)
 library(readxl)
 ```
 
-```{r chargement-donnees, warning=FALSE, message=FALSE}
+```{r warning=FALSE, message=FALSE}
 #1.importation des données 
 contrats <- read_excel("Contrat.xlsx",guess_max = Inf)
 sinistres <- read_excel("Sinistre.xlsx",guess_max = Inf)                
 ```
 
 
-```{r chargement-donnees, warning=FALSE, message=FALSE}
+```{r warning=FALSE, message=FALSE}
 print("----STRUCTURE DE LA TABLE CONTRAT")
 glimpse(contrats)
 
@@ -67,7 +67,7 @@ contrats_clean <- contrats %>%
 
 ```
 
-```{r nettoyage-types, warning=FALSE,message=FALSE}
+```{r warning=FALSE,message=FALSE}
 #2. Correction de la table Sinistre 
 
 sinistres_clean <- sinistres %>%
@@ -87,7 +87,7 @@ sinistres_clean <- sinistres %>%
 
 
 
-```{r nettoyage-types, warning=FALSE,message=FALSE}
+```{r warning=FALSE,message=FALSE}
 #3. verifications des changements 
 print("---- VERIFICATION CONTRATS -----")
 glimpse(contrats_clean)
