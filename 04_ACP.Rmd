@@ -1,0 +1,192 @@
+---
+title: "Analyse en Composantes Principales (ACP)"
+author: "Projet ENSAssuRances"
+subtitle: "Volet 4 - Apprentissage Non Supervisé"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: '3'
+  html_document:
+    theme: paper
+    highlight: tango
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+    number_sections: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+# Options globales pour rendre le rapport HTML très propre
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = "center")
+```
+
+
+
+# 1. Introduction à l'Analyse Multivariée
+
+Dans cette étape, nous quittons la statistique univariée pour explorer les relations complexes entre de multiples variables *simultanément*. 
+
+L'**Analyse en Composantes Principales (ACP)** est une méthode de Machine Learning (apprentissage non supervisé) qui va nous permettre de :
+
+* **Résumer l'information** contenue dans notre grand nombre de variables quantitatives.
+* **Réduire la dimensionnalité** de notre base de données en créant de nouveaux axes de lecture (les composantes).
+* **Identifier des profils types** d'assurés et de véhicules en observant les corrélations directes (ex: un véhicule lourd est-il toujours associé à une prime d'assurance plus élevée ?).
+
+## 1.1. Préparation des données actives
+
+L'algorithme de l'ACP obéit à des règles mathématiques strictes : il nécessite des données **strictement numériques (continues)** et **sans valeurs manquantes (NA)**. 
+
+Nous isolons donc les trois grandes familles de caractéristiques de notre portefeuille :
+
+* 👤 **Le profil du conducteur** : Âge de l'assuré et ancienneté du permis de conduire.
+* 🚗 **Le véhicule assuré** : Âge du véhicule, Poids, Puissance (DIN) et Valeur estimée.
+* 📄 **Le contrat et le risque** : Montant de la franchise, Prime de base et Nombre d'antécédents de sinistres.
+
+
+```{r}
+# Chargement des librairies
+library(dplyr)
+library(FactoMineR)
+library(factoextra)
+
+# Chargement de la base globale
+contrats_globaux <- readRDS("contrats_exploration_ok.rds")
+
+# Sélection des variables continues pertinentes
+data_acp <- contrats_globaux %>%
+  select(
+    drv1Age, drv1DriveLicenceAge,    # Profil du conducteur (Âge et Permis)
+    vhAge, vhWeight, vhDIN, vhValue, # Caractéristiques du véhicule (Âge, Poids, Puissance, Valeur)
+    ctDeduc, COT_AssBase, claimsAnt  # Données du contrat (Franchise, Prime de base, Antécédents)
+  ) %>%
+  tidyr::drop_na() # Suppression des lignes contenant des NA
+
+# Vérification
+print("--- DIMENSIONS AVANT L'ACP ---")
+cat("Nombre d'individus (lignes) :", nrow(data_acp), "\n")
+cat("Nombre de variables (colonnes) :", ncol(data_acp), "\n")
+```
+## 1.2. Exécution de l'algorithme et Variances
+
+Nous appliquons l'algorithme d'Analyse en Composantes Principales via la fonction `PCA()` du package `FactoMineR`. 
+Une étape cruciale de ce calcul est le paramètre `scale.unit = TRUE`. En effet, nos variables ayant des unités et des échelles radicalement différentes (des années, des kilos, des euros), il est indispensable de les centrer et de les réduire pour qu'elles aient toutes le même poids dans le modèle.
+
+Le premier résultat graphique à analyser est l'**éboulis des valeurs propres**. Il nous indique le pourcentage d'information (la variance) résumé par chaque nouvelle dimension créée.
+
+
+```{r execution-acp, fig.width=8, fig.height=5}
+# Exécution de l'ACP 
+res_acp <- PCA(data_acp, scale.unit = TRUE, ncp = 5, graph = FALSE)
+
+# Visualisation de la variance expliquée (Éboulis des valeurs propres)
+graph_vp <- fviz_eig(res_acp, 
+                     addlabels = TRUE, 
+                     ylim = c(0, 40),
+                     barfill = "#3498db", 
+                     barcolor = "#2980b9",
+                     main = "Éboulis des valeurs propres (Variance expliquée)",
+                     xlab = "Dimensions (Axes principaux)",
+                     ylab = "Pourcentage de variance")
+
+# Affichage du graphique
+print(graph_vp)
+```
+
+```{r}
+print(head(res_acp$eig))
+```
+## 1.3. Interprétation de la variance expliquée
+
+Le tableau des valeurs propres nous permet de sélectionner le nombre d'axes pertinents à retenir pour notre analyse :
+
+* **Application du critère de Kaiser :** Les 4 premières composantes principales affichent une valeur propre (eigenvalue) supérieure à 1. Cela indique que l'information n'est pas concentrée sur un seul facteur prédominant, mais structurée autour de plusieurs dimensions.
+* **Qualité de représentation du premier plan :** L'Axe 1 (22,47 %) et l'Axe 2 (20,06 %) capturent à eux seuls **42,53 % de l'inertie totale** du nuage de points. Cette projection en deux dimensions (le premier plan factoriel) est de très bonne qualité pour des données comportementales et tarifaires issues du monde réel, et sera donc privilégiée pour lire nos corrélations.
+
+## 1.4. Le Cercle des Corrélations (Variables)
+
+Le cercle des corrélations projette nos 9 variables initiales sur le premier plan factoriel (Axes 1 et 2).
+* Des flèches proches (formant un angle aigu) indiquent des variables fortement corrélées positivement.
+* Des flèches opposées indiquent une corrélation négative.
+* Des flèches formant un angle droit (90°) indiquent des variables indépendantes.
+
+```{r cercle-correlations, fig.width=8, fig.height=6}
+# Création du cercle des corrélations avec factoextra
+graph_var <- fviz_pca_var(res_acp, 
+             col.var = "contrib", # On colore selon la contribution de la variable à l'axe
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), # Du bleu (faible) au rouge (fort)
+             repel = TRUE, # Évite la superposition des étiquettes (très pratique !)
+             title = "Cercle des Corrélations des variables d'Assurance (Axes 1 & 2)")
+
+print(graph_var)
+
+# ASTUCE POUR NOTRE BINÔME : On extrait les coordonnées exactes pour les analyser ensemble
+print("--- COORDONNÉES DES VARIABLES SUR L'AXE 1 ---")
+print(round(res_acp$var$coord[, 1], 2))
+
+print("--- COORDONNÉES DES VARIABLES SUR L'AXE 2 ---")
+print(round(res_acp$var$coord[, 2], 2))
+```
+
+## 1.5. Interprétation des Axes Factoriels (Conclusions Métier)
+
+La projection des variables sur le premier plan factoriel révèle une structure bipartite extrêmement nette dans le portefeuille d'ENSAssuRances :
+
+* **Axe 1 (L'Expérience du Conducteur) :** Cet axe horizontal est exclusivement défini par l'âge de l'assuré (coordonnée de 0.99) et l'ancienneté de son permis de conduire (0.99). Ces deux variables sont logiquement redondantes et parfaitement corrélées positivement.
+* **Axe 2 (La Gamme du Véhicule) :** Cet axe vertical capte les caractéristiques techniques et financières de la voiture. Il oppose les véhicules puissants (DIN : 0.84), chers (Value : 0.78) et lourds (Weight : 0.64) aux véhicules plus modestes et plus anciens (Age du véhicule : -0.22).
+* **Indépendance des profils :** Fait remarquable pour le positionnement commercial, ces deux groupes de variables sont orthogonaux (forment un angle de 90°). Dans cette base de données, la gamme du véhicule conduit est **indépendante** de l'âge du conducteur. 
+* **Variables résiduelles :** Le montant de la franchise, les antécédents de sinistres et la prime de base sont très proches du centre de gravité (le point 0,0). Leurs variances ne sont pas capturées par ce premier plan en deux dimensions (Axes 1 et 2), suggérant que le risque et la tarification répondent à d'autres logiques multivariées ou catégorielles que nous explorerons avec l'ACM.
+
+
+## 1.5. Répartition des Individus et Contributions
+
+### A. La Carte de Densité des Profils (Individus)
+
+Au lieu d'afficher 300 000 points superposés qui rendraient le graphique illisible, nous utilisons une **carte de densité spatiale**. Plus la couleur est foncée, plus la concentration d'assurés partageant le même profil est forte.
+
+```{r graph-individus-densite, fig.width=8, fig.height=6}
+library(ggplot2)
+library(factoextra) # On le recharge ici pour éviter l'erreur !
+
+# 1. Extraction des coordonnées exactes des 300 000 individus sur les axes 1 et 2
+coord_ind <- as.data.frame(res_acp$ind$coord)
+
+# 2. Création de la carte de densité (Heatmap 2D)
+graph_ind_pro <- ggplot(coord_ind, aes(x = Dim.1, y = Dim.2)) +
+  # stat_density_2d crée de belles zones de couleurs selon la concentration
+  stat_density_2d(aes(fill = ..level..), geom = "polygon", color = "white", linewidth = 0.1) +
+  scale_fill_gradient(low = "#ecf0f1", high = "#2c3e50", name = "Densité\nd'assurés") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Concentration des profils d'assurés (Plan Factoriel)",
+    subtitle = "Lecture : Plus la zone est foncée, plus le nombre de clients est élevé",
+    x = "Axe 1 : Âge et Expérience du conducteur (22.5%)",
+    y = "Axe 2 : Puissance et Valeur du véhicule (20.1%)"
+  ) +
+  theme_minimal()
+
+print(graph_ind_pro)
+```
+
+### B. Contribution des variables aux axes
+Ce graphique confirme mathématiquement notre lecture : quelles sont les variables qui "tirent" le plus les individus vers la droite/gauche (Axe 1) ou vers le haut/bas (Axe 2) ? La ligne rouge en pointillés représente le seuil de contribution moyenne.
+
+```{r}
+library(gridExtra)
+
+# Barplot des contributions à l'Axe 1 (On utilise bien fviz_contrib du package factoextra)
+contrib_axe1 <- fviz_contrib(res_acp, choice = "var", axes = 1, 
+                             fill = "#3498db", color = "black", 
+                             title = "Ce qui définit l'Axe 1 (Âge)")
+
+# Barplot des contributions à l'Axe 2
+contrib_axe2 <- fviz_contrib(res_acp, choice = "var", axes = 2, 
+                             fill = "#e67e22", color = "black", 
+                             title = "Ce qui définit l'Axe 2 (Véhicule)")
+
+# Affichage côte à côte
+grid.arrange(contrib_axe1, contrib_axe2, ncol = 2)
+```
+
