@@ -1,0 +1,144 @@
+---
+title: "Segmentation des Assurés (Clustering)"
+subtitle: "Volet 6 - Apprentissage Non Supervisé (K-Means)"
+author: "Projet ENSAssuRances"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: paper
+    highlight: tango
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+    number_sections: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = "center")
+```
+
+#1. Introduction au Clustering
+L'objectif de cette ultime étape d'analyse est de segmenter notre portefeuille de 301 437 contrats en groupes homogènes (clusters). Cette classification permettra à ENSAssuRances d'adapter sa tarification et ses actions commerciales à des "profils types" d'assurés en s'appuyant sur l'algorithme des K-Means.
+
+##1.1. Préparation et Standardisation des données
+Les algorithmes de clustering se basent sur le calcul de distances géométriques entre les individus. Il est donc indispensable de :
+
+###N'utiliser que des variables numériques.
+
+####Standardiser (centrer-réduire) ces variables pour que les montants en euros (Valeur du véhicule) n'écrasent pas les petites valeurs (Âge du conducteur).
+
+```{r}
+library(dplyr)
+library(cluster)
+library(factoextra)
+
+# 1. Chargement de la base
+contrats_globaux <- readRDS("contrats_exploration_ok.rds")
+
+# 2. Sélection des variables continues pertinentes
+data_cluster <- contrats_globaux %>%
+  select(
+    drv1Age, drv1DriveLicenceAge, # Profil humain
+    vhAge, vhWeight, vhDIN, vhValue, # Profil véhicule
+    COT_AssBase, claimsAnt # Profil contrat/risque
+  ) %>%
+  tidyr::drop_na()
+
+# 3. Standardisation (Centrage-Réduction) : ÉTAPE CRUCIALE
+data_scaled <- scale(data_cluster)
+
+print("Données standardisées prêtes pour le Machine Learning.")
+```
+## 1.2. Recherche du nombre optimal de clusters (Méthode du Coude)
+
+La fonction de visualisation de la méthode du coude nécessitant trop de mémoire RAM pour s'exécuter sur 300 000 lignes (risque de saturation géométrique), nous appliquons cette recherche du nombre optimal ($k$) sur un échantillon représentatif de 20 000 individus.
+
+```{r methode-coude, fig.width=8, fig.height=5}
+library(factoextra)
+library(ggplot2)
+
+# 1. Création d'un échantillon représentatif pour éviter l'explosion de la RAM
+set.seed(123)
+echantillon_coude <- data_scaled[sample(1:nrow(data_scaled), 20000), ]
+
+# 2. Exécution de la méthode du coude sur l'échantillon
+graph_coude <- fviz_nbclust(echantillon_coude, kmeans, method = "wss", k.max = 8) +
+  theme_minimal() +
+  labs(
+    title = "Méthode du Coude (Elbow Method)",
+    subtitle = "Détermination du nombre optimal de clusters (k) sur échantillon",
+    x = "Nombre de clusters (k)",
+    y = "Inertie intra-classe (WSS)"
+  ) +
+  geom_line(color = "#c0392b", linewidth = 1) +
+  geom_point(color = "#c0392b", size = 3)
+
+print(graph_coude)
+```
+
+## 1.3. Exécution de l'algorithme K-Means et Profilage
+
+La méthode du coude nous ayant mathématiquement indiqué que 3 clusters forment la segmentation optimale de notre portefeuille, nous appliquons l'algorithme des K-Means avec $k=3$ sur l'intégralité de nos 301 437 clients. 
+
+Nous calculons ensuite la moyenne des variables initiales pour "faire parler" les clusters et dresser le portrait-robot de chaque segment tarifaire.
+
+```{r execution-kmeans}
+# On fixe le nombre optimal de clusters trouvé grâce à la méthode du coude
+k_optimal <- 3 
+
+# 1. Exécution des K-Means sur les 300 000 clients standardisés
+set.seed(123) # Pour garantir les mêmes résultats à chaque fois
+kmeans_res <- kmeans(data_scaled, centers = k_optimal, nstart = 25)
+
+# 2. Ajout du numéro de cluster (1, 2 ou 3) à notre base de données
+data_profils <- data_cluster %>%
+  mutate(Cluster = as.factor(kmeans_res$cluster))
+
+# 3. Profilage : Calcul des moyennes des variables brutes pour chaque cluster
+profils_moyens <- data_profils %>%
+  group_by(Cluster) %>%
+  summarise(
+    Effectif = n(),
+    Age_Moyen = round(mean(drv1Age), 1),
+    Permis_Moyen = round(mean(drv1DriveLicenceAge), 1),
+    Age_Vehicule = round(mean(vhAge), 1),
+    Valeur_Vehicule = round(mean(vhValue), 0),
+    Puissance_DIN = round(mean(vhDIN), 0),
+    Prime_Moyenne = round(mean(COT_AssBase), 0),
+    Antecedents = round(mean(claimsAnt), 2)
+  )
+
+# 4. Affichage du tableau final
+print("--- PORTRAIT-ROBOT DES 3 CLUSTERS ---")
+print(profils_moyens)
+```
+```{r}
+print(as.data.frame(profils_moyens))
+```
+
+## 1.4. Interprétation des Profils Tarifaires (Conclusions Métier)
+
+L'algorithme des K-Means a identifié avec succès trois segments de clientèle extrêmement nets au sein du portefeuille d'ENSAssuRances. Cette segmentation ne se fait pas sur le risque passé (les antécédents étant lissés autour de 0.40 pour tous), mais sur un double axe **Générationnel / Valeur du véhicule**.
+
+### 🔹 Cluster 1 : Les "Jeunes Actifs / Véhicules Modestes" (Le cœur de cible)
+* **Poids :** 119 452 assurés (Le segment le plus volumineux, ~40% du portefeuille).
+* **Profil Humain :** Les plus jeunes (34,7 ans en moyenne) avec environ 15 ans de permis.
+* **Profil Véhicule :** Des véhicules vieillissants (11,8 ans), peu puissants (109 DIN) et présentant la valeur financière la plus faible (8 710 €).
+* **Tarification :** Logiquement, ce groupe paie la prime de base moyenne la plus basse (43 €), reflétant le faible coût de remplacement du véhicule en cas de sinistre total.
+
+### 🔹 Cluster 2 : Les "Seniors / Véhicules Classiques" (La fidélité)
+* **Poids :** 101 920 assurés (~34%).
+* **Profil Humain :** La clientèle la plus âgée (59,1 ans) bénéficiant de la plus forte expérience au volant (près de 40 ans de permis).
+* **Profil Véhicule :** Des véhicules de milieu de gamme (9 786 € et 121 DIN), les plus âgés du portefeuille (12,2 ans). 
+* **Tarification :** La prime s'élève à 48 €, traduisant peut-être des garanties plus couvrantes (Tous Risques) sur des profils très stables.
+
+### 🔹 Cluster 3 : Les "Quadras / Véhicules Premium" (Le haut de gamme)
+* **Poids :** 80 065 assurés (~26%).
+* **Profil Humain :** Des conducteurs d'âge intermédiaire (41,2 ans) avec une solide expérience (21 ans de permis).
+* **Profil Véhicule :** **C'est le trait marquant de ce cluster.** Ils possèdent les véhicules les plus récents (10,2 ans), extrêmement puissants (183 DIN) et dont la valeur financière (17 719 €) est quasiment le double des autres segments !
+* **Tarification (Anomalie Actuarielle ?) :** Fait fascinant, leur prime de base (48 €) est strictement identique à celle des seniors (Cluster 2), alors que l'engagement financier de l'assureur en cas de destruction du véhicule est deux fois supérieur. Cela suggère une potentielle sous-tarification de ce segment "Premium", ou une sur-tarification des "Seniors" qui compensent le risque financier des plus jeunes.
+
+**Conclusion générale :**
+Cette analyse non supervisée démontre que la segmentation tarifaire d'ENSAssuRances gagnerait à être révisée. Une attention particulière devra être portée au **Cluster 3**, dont la valeur des véhicules (le risque matériel) ne semble pas pleinement reflétée dans la prime de base par rapport aux autres segments.
