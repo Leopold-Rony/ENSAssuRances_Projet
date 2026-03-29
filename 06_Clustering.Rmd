@@ -118,7 +118,41 @@ print(profils_moyens)
 print(as.data.frame(profils_moyens))
 ```
 
-## 1.4. Interprétation des Profils Tarifaires (Conclusions Métier)
+## 1.4. Visualisation spatiale des Clusters
+
+Pour bien comprendre comment nos 3 groupes se séparent mathématiquement, nous les projetons sur un graphique en deux dimensions. 
+*Note technique : Pour des raisons d'optimisation de rendu visuel et de légèreté du rapport HTML, cette visualisation est générée sur un échantillon représentatif de 10 000 assurés tirés du K-Means global.*
+
+```{r visu-clusters, fig.width=9, fig.height=6}
+library(factoextra)
+
+# 1. Tirage d'un échantillon de 10 000 individus
+set.seed(123)
+idx_sample <- sample(1:nrow(data_scaled), 10000)
+
+# 2. Création d'un mini-dataset pour le graphique
+data_visu <- data_scaled[idx_sample, ]
+clusters_visu <- kmeans_res$cluster[idx_sample]
+
+# 3. Génération du graphique des clusters
+graph_clusters <- fviz_cluster(
+  list(data = data_visu, cluster = clusters_visu),
+  geom = "point",                # Uniquement des points (pas de texte)
+  ellipse.type = "convex",       # Dessine une zone autour de chaque cluster
+  pointsize = 1.5,
+  alpha = 0.5,                   # Légère transparence
+  palette = c("#27ae60", "#2980b9", "#c0392b"), # Vert, Bleu, Rouge
+  ggtheme = theme_minimal(),
+  main = "Cartographie des 3 segments tarifaires (K-Means)",
+  xlab = "Dimension 1 (Profil Générationnel)",
+  ylab = "Dimension 2 (Gamme du Véhicule)"
+)
+
+print(graph_clusters)
+```
+
+
+## 1.5. Interprétation des Profils Tarifaires (Conclusions Métier)
 
 L'algorithme des K-Means a identifié avec succès trois segments de clientèle extrêmement nets au sein du portefeuille d'ENSAssuRances. Cette segmentation ne se fait pas sur le risque passé (les antécédents étant lissés autour de 0.40 pour tous), mais sur un double axe **Générationnel / Valeur du véhicule**.
 
